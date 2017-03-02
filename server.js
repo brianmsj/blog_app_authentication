@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const morgan = require('morgan');
 const passport = require('passport');
+const {BasicStrategy} = require('passport-http');
 
 const {DATABASE_URL, PORT} = require('./config');
 const {BlogPost, User} = require('./models');
@@ -190,15 +191,47 @@ app.post('/users', (req, res) => {
     });
 });
 
-
-
-
-
-
-
-app.use('*', function(req, res) {
-  res.status(404).json({message: 'Not Found'});
+app.get('/users', (req, res) => {
+  return User
+    .find()
+    .exec()
+    .then(users => res.json(users.map(user => user.apiRepr())))
+    .catch(err => console.log(err) && res.status(500).json({message: 'Internal server error'}));
 });
+
+// NB: at time of writing, passport uses callbacks, not promises
+const basicStrategy = new BasicStrategy(function(username, password, callback) {
+  let user;
+  User
+    .findOne({username: username})
+    .exec()
+    .then(_user => {
+      user = _user;
+      if (!user) {
+        return callback(null, false, {message: 'Incorrect username'});
+      }
+      return user.validatePassword(password);
+    })
+    .then(isValid => {
+      if (!isValid) {
+        return callback(null, false, {message: 'Incorrect password'});
+      }
+      else {
+        return callback(null, user)
+      }
+    });
+});
+
+
+passport.use(basicStrategy);
+app.use(passport.initialize());
+
+app.get('/users/me',
+  passport.authenticate('basic', {session: false}),
+  (req, res) => res.json({user: req.user.apiRepr()})
+);
+
+
 
 // closeServer needs access to a server object, but that only
 // gets created when `runServer` runs, so we declare `server` here
